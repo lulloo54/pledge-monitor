@@ -552,20 +552,33 @@ window.addEventListener('load', () => {
 function fmt(n)    { return Math.round(n).toLocaleString('ko-KR'); }
 function fmtPct(n) { return (n >= 0 ? '+' : '') + n.toFixed(2) + '%'; }
 
-async function fetchStock(ticker) {
-  const proxy = url => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+async function fetchViaProxy(url) {
+  const PROXIES = [
+    u => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
+    u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+    u => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
+    u => `https://thingproxy.freeboard.io/fetch/${u}`,
+  ];
+  for (const makeProxy of PROXIES) {
+    try {
+      const r = await fetch(makeProxy(url), { signal: AbortSignal.timeout(6000) });
+      if (!r.ok) continue;
+      const j = await r.json();
+      const raw = j.contents !== undefined ? j.contents : JSON.stringify(j);
+      const parsed = JSON.parse(raw);
+      if (parsed?.chart?.result) return parsed;
+    } catch(e) { continue; }
+  }
+  throw new Error('all proxies failed');
+}
 
-  // 1개월 데이터 (현재가 + 전일/1주전 계산용)
+async function fetchStock(ticker) {
   const url1mo = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=3mo`;
-  // 1년 데이터 (52주 저가/고가 직접 계산용)
   const url1y  = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1y`;
 
-  const [r1mo, r1y] = await Promise.all([fetch(proxy(url1mo)), fetch(proxy(url1y))]);
-  if (!r1mo.ok || !r1y.ok) throw new Error('network');
-
-  const [j1mo, j1y] = await Promise.all([r1mo.json(), r1y.json()]);
-  const d1mo = JSON.parse(j1mo.contents).chart.result[0];
-  const d1y  = JSON.parse(j1y.contents).chart.result[0];
+  const [res1mo, res1y] = await Promise.all([fetchViaProxy(url1mo), fetchViaProxy(url1y)]);
+  const d1mo = res1mo.chart.result[0];
+  const d1y  = res1y.chart.result[0];
 
   // 1개월 closes
   const closes = d1mo.indicators.quote[0].close.filter(Boolean);
