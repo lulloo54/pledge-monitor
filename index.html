@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>근질권 담보 주가 모니터</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  :root {
+    --bg:#f5f6f8; --bg2:#ffffff; --bg3:#f0f1f3;
+    --border:#e0e3e8; --border2:#c8ccd4;
+    --text1:#1a1d23; --text2:#5a6072; --text3:#9099aa;
+    --accent:#1a56db;
+    --safe:#2f9e44; --warn:#e67700; --danger:#c92a2a;
+    --safe-bg:rgba(47,158,68,0.08); --warn-bg:rgba(230,119,0,0.1); --danger-bg:rgba(201,42,42,0.1);
+    --up:#e03131; --down:#1971c2;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text1); font-family:'Noto Sans KR',sans-serif; padding:28px 20px; }
+
+  /* Header */
+  .header { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; padding-bottom:16px; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:10px; }
+  .header-left { display:flex; align-items:center; gap:10px; }
+  .logo { width:34px; height:34px; background:linear-gradient(135deg,#e8720c,#ff6b35); border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:16px; }
+  .title { font-size:17px; font-weight:700; color:var(--text1); }
+  .subtitle { font-size:11px; color:var(--text2); margin-top:1px; }
+  .header-right { display:flex; align-items:center; gap:10px; }
+  .last-update { font-size:11px; color:var(--text3); font-family:'JetBrains Mono',monospace; }
+  .refresh-btn { background:var(--bg2); border:1px solid var(--border); color:var(--text1); padding:7px 13px; border-radius:6px; font-size:12px; font-family:'Noto Sans KR',sans-serif; cursor:pointer; display:flex; align-items:center; gap:5px; }
+  .refresh-btn:hover { background:var(--bg3); }
+  .spin.active { animation:spin 0.8s linear infinite; display:inline-block; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+
+  /* 경고 배너 */
+  .alert-wrap { display:flex; flex-direction:column; gap:8px; margin-bottom:16px; }
+  .alert-box { display:flex; align-items:center; gap:10px; border-radius:8px; padding:12px 16px; font-size:13px; font-weight:600; }
+  .alert-box.warn   { background:var(--warn-bg);   border:1px solid rgba(230,119,0,0.3);  color:var(--warn); }
+  .alert-box.danger { background:var(--danger-bg); border:1px solid rgba(201,42,42,0.3);  color:var(--danger); }
+
+  /* 담보 현황 요약 카드 */
+  .summary-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:24px; }
+  .summary-card { background:var(--bg2); border:1px solid var(--border); border-radius:10px; padding:14px 16px; }
+  .summary-label { font-size:10px; font-weight:700; color:var(--text2); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px; }
+  .summary-val { font-size:20px; font-weight:700; font-family:'JetBrains Mono',monospace; color:var(--text1); letter-spacing:-0.5px; }
+  .summary-sub { font-size:11px; color:var(--text3); margin-top:3px; }
+
+  /* 담보비율 게이지 카드 */
+  .ratio-card { background:var(--bg2); border:1px solid var(--border); border-radius:10px; padding:18px 20px; margin-bottom:24px; }
+  .ratio-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+  .ratio-title { font-size:13px; font-weight:700; }
+  .ratio-badge { font-size:12px; font-weight:700; padding:4px 12px; border-radius:20px; }
+  .ratio-num { font-size:36px; font-weight:700; font-family:'JetBrains Mono',monospace; letter-spacing:-1px; margin-bottom:12px; }
+  .ratio-bar-wrap { background:var(--bg3); border-radius:99px; height:10px; overflow:hidden; margin-bottom:6px; position:relative; }
+  .ratio-bar-fill { height:100%; border-radius:99px; transition:width 0.8s cubic-bezier(0.4,0,0.2,1); }
+  .ratio-markers { display:flex; justify-content:space-between; font-size:10px; color:var(--text3); margin-top:4px; }
+  .ratio-lines { position:absolute; top:0; left:0; right:0; bottom:0; }
+  .ratio-line { position:absolute; top:0; bottom:0; width:2px; background:rgba(0,0,0,0.15); }
+  .ratio-line-label { position:absolute; font-size:9px; font-weight:700; top:-16px; transform:translateX(-50%); }
+
+  /* 주식 카드 */
+  .cards-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:14px; margin-bottom:24px; }
+  .stock-card { background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:20px; position:relative; overflow:hidden; }
+  .stock-card::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; }
+  .stock-card.safe::before  { background:var(--safe); }
+  .stock-card.warn::before  { background:var(--warn); border-color:var(--warn); }
+  .stock-card.danger::before{ background:var(--danger); }
+  .stock-card.warn   { border-color:rgba(230,119,0,0.4); }
+  .stock-card.danger { border-color:rgba(201,42,42,0.4); }
+
+  .card-top { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:14px; }
+  .stock-name { font-size:15px; font-weight:700; }
+  .stock-ticker { font-size:10px; color:var(--text3); font-family:'JetBrains Mono',monospace; margin-top:2px; }
+  .status-badge { font-size:11px; font-weight:700; padding:3px 10px; border-radius:20px; }
+  .badge-safe   { background:var(--safe-bg);   color:var(--safe);   border:1px solid rgba(47,158,68,0.3); }
+  .badge-warn   { background:var(--warn-bg);   color:var(--warn);   border:1px solid rgba(230,119,0,0.3); }
+  .badge-danger { background:var(--danger-bg); color:var(--danger); border:1px solid rgba(201,42,42,0.3); }
+  .badge-loading{ background:var(--bg3); color:var(--text3); border:1px solid var(--border); }
+
+  .price-main { font-size:30px; font-weight:700; font-family:'JetBrains Mono',monospace; letter-spacing:-1px; }
+  .week-chg { font-size:12px; font-family:'JetBrains Mono',monospace; font-weight:600; margin-bottom:14px; margin-top:3px; }
+  .up { color:var(--up); } .down { color:var(--down); } .flat { color:var(--text3); }
+
+  .metrics { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:14px; }
+  .metric { background:var(--bg3); border-radius:7px; padding:9px 11px; }
+  .metric-label { font-size:10px; color:var(--text3); text-transform:uppercase; letter-spacing:0.4px; margin-bottom:3px; }
+  .metric-val { font-size:13px; font-weight:600; font-family:'JetBrains Mono',monospace; color:var(--text1); }
+  .metric-val.safe-col   { color:var(--safe); }
+  .metric-val.warn-col   { color:var(--warn); }
+  .metric-val.danger-col { color:var(--danger); }
+
+  .progress-section { margin-bottom:14px; }
+  .progress-header { display:flex; justify-content:space-between; margin-bottom:5px; }
+  .progress-label { font-size:11px; color:var(--text2); }
+  .progress-pct { font-size:11px; font-family:'JetBrains Mono',monospace; color:var(--text2); }
+  .progress-track { height:5px; background:var(--bg3); border-radius:99px; overflow:hidden; }
+  .progress-fill { height:100%; border-radius:99px; transition:width 0.6s; }
+
+  .chart-section { border-top:1px solid var(--border); padding-top:12px; }
+  .chart-label { font-size:10px; color:var(--text3); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px; }
+
+  /* 설정 패널 */
+  .settings-panel { background:var(--bg2); border:1px solid var(--border); border-radius:10px; padding:16px 18px; margin-bottom:24px; }
+  .settings-title { font-size:11px; font-weight:700; color:var(--text2); text-transform:uppercase; letter-spacing:0.8px; margin-bottom:12px; }
+  .settings-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; align-items:end; }
+  .field label { display:block; font-size:11px; color:var(--text2); margin-bottom:4px; font-weight:500; }
+  .field input { width:100%; background:var(--bg3); border:1px solid var(--border); color:var(--text1); padding:7px 10px; border-radius:6px; font-size:13px; font-family:'JetBrains Mono',monospace; outline:none; }
+  .field input:focus { border-color:var(--accent); }
+  .apply-btn { background:var(--accent); border:none; color:#fff; padding:8px 16px; border-radius:6px; font-size:12px; font-weight:700; font-family:'Noto Sans KR',sans-serif; cursor:pointer; white-space:nowrap; }
+  .apply-btn:hover { opacity:0.85; }
+  .error-note { font-size:11px; color:var(--warn); margin-top:8px; display:none; }
+  .error-note.show { display:block; }
+
+  .footer { text-align:center; font-size:11px; color:var(--text3); padding-top:14px; border-top:1px solid var(--border); line-height:1.8; }
+
+  @media(max-width:600px) { body{padding:16px 12px;} }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <div class="logo">🔒</div>
+    <div>
+      <div class="title">근질권 담보 주가 모니터</div>
+      <div class="subtitle">Pledge Stock Monitor — 대출잔액 100억원 기준</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <span class="last-update" id="last-update">업데이트 대기 중...</span>
+    <button class="refresh-btn" onclick="fetchAll()" id="refresh-btn">
+      <span class="spin" id="spin-icon">↻</span> 새로고침
+    </button>
+  </div>
+</div>
+
+<!-- 경고 배너 -->
+<div class="alert-wrap" id="alert-wrap"></div>
+
+<!-- 담보비율 요약 -->
+<div class="ratio-card" id="ratio-card">
+  <div class="ratio-header">
+    <div class="ratio-title">📊 현재 담보비율</div>
+    <span class="ratio-badge" id="ratio-badge" style="background:var(--safe-bg);color:var(--safe);">계산 중</span>
+  </div>
+  <div class="ratio-num" id="ratio-num">— %</div>
+  <div class="ratio-bar-wrap">
+    <div class="ratio-lines">
+      <!-- 140% 마커: (140/300)*100 = 46.7% -->
+      <div class="ratio-line" style="left:46.7%;">
+        <span class="ratio-line-label" style="color:var(--danger);">140%</span>
+      </div>
+      <!-- 200% 마커: (200/300)*100 = 66.7% -->
+      <div class="ratio-line" style="left:66.7%;">
+        <span class="ratio-line-label" style="color:var(--warn);">200%</span>
+      </div>
+    </div>
+    <div class="ratio-bar-fill" id="ratio-bar" style="width:0%; background:var(--safe);"></div>
+  </div>
+  <div class="ratio-markers">
+    <span>0%</span><span>100%</span><span>140% (유지)</span><span>200% (개시)</span><span>300%+</span>
+  </div>
+</div>
+
+<!-- 담보평가액 요약 -->
+<div class="summary-grid">
+  <div class="summary-card">
+    <div class="summary-label">대출잔액</div>
+    <div class="summary-val">100억</div>
+    <div class="summary-sub">원</div>
+  </div>
+  <div class="summary-card">
+    <div class="summary-label">담보평가액 합계</div>
+    <div class="summary-val" id="total-eval">—</div>
+    <div class="summary-sub" id="total-eval-sub">애경 + 제주항공</div>
+  </div>
+  <div class="summary-card">
+    <div class="summary-label">유지기준 필요금액</div>
+    <div class="summary-val" style="color:var(--danger);">140억</div>
+    <div class="summary-sub">미달 시 추가담보 필요</div>
+  </div>
+  <div class="summary-card">
+    <div class="summary-label">여유금액</div>
+    <div class="summary-val" id="margin-val">—</div>
+    <div class="summary-sub" id="margin-sub">담보평가액 - 140억</div>
+  </div>
+</div>
+
+<!-- 설정 -->
+<div class="settings-panel">
+  <div class="settings-title">⚙ 담보 설정</div>
+  <div class="settings-grid">
+    <div class="field">
+      <label>경고 담보비율 (%) — 이 비율 미만이면 주황색 경고</label>
+      <input type="number" id="warn-ratio" value="160" min="141" max="300" />
+    </div>
+    <div class="field" style="display:flex;align-items:flex-end;">
+      <button class="apply-btn" onclick="applyAndFetch()">적용</button>
+    </div>
+  </div>
+  <div style="font-size:11px;color:var(--text3);margin-top:8px;">
+    ※ 위험(빨강): 담보비율 140% 미달 &nbsp;|&nbsp; 경고(주황): 설정 비율 미달 &nbsp;|&nbsp; 안전(초록): 정상
+  </div>
+  <div class="error-note" id="error-note">⚠ 주가 조회에 실패했습니다. 잠시 후 다시 시도해주세요.</div>
+</div>
+
+<!-- 주식 카드 -->
+<div class="cards-grid">
+  <!-- 애경케미칼 -->
+  <div class="stock-card" id="card-AK">
+    <div class="card-top">
+      <div>
+        <div class="stock-name">애경케미칼</div>
+        <div class="stock-ticker">161000.KS · 1,363,194주</div>
+      </div>
+      <span class="status-badge badge-loading" id="badge-AK">조회 중</span>
+    </div>
+    <div class="price-main" id="price-AK">—</div>
+    <div class="week-chg flat" id="weekchg-AK">1주일 전 대비 —</div>
+    <div class="metrics">
+      <div class="metric"><div class="metric-label">전일 종가</div><div class="metric-val" id="baseprice-AK">—</div></div>
+      <div class="metric"><div class="metric-label">3개월 저가 대비</div><div class="metric-val" id="vsbase-AK">—</div></div>
+      <div class="metric"><div class="metric-label">담보 평가액</div><div class="metric-val" id="evalamt-AK">—</div></div>
+      <div class="metric"><div class="metric-label">3개월 저가</div><div class="metric-val" id="low3m-AK">—</div></div>
+    </div>
+    <div class="progress-section">
+      <div class="progress-header">
+        <span class="progress-label">기준가 대비 여유도</span>
+        <span class="progress-pct" id="prog-pct-AK">—</span>
+      </div>
+      <div class="progress-track"><div class="progress-fill" id="prog-AK" style="width:100%;background:var(--safe);"></div></div>
+    </div>
+    <div class="chart-section">
+      <div class="chart-label">3개월 주가 추이</div>
+      <div style="position:relative;height:110px;"><canvas id="chart-AK"></canvas></div>
+    </div>
+  </div>
+
+  <!-- 제주항공 -->
+  <div class="stock-card" id="card-JJ">
+    <div class="card-top">
+      <div>
+        <div class="stock-name">제주항공</div>
+        <div class="stock-ticker">089590.KS · 1,410,106주</div>
+      </div>
+      <span class="status-badge badge-loading" id="badge-JJ">조회 중</span>
+    </div>
+    <div class="price-main" id="price-JJ">—</div>
+    <div class="week-chg flat" id="weekchg-JJ">1주일 전 대비 —</div>
+    <div class="metrics">
+      <div class="metric"><div class="metric-label">전일 종가</div><div class="metric-val" id="baseprice-JJ">—</div></div>
+      <div class="metric"><div class="metric-label">3개월 저가 대비</div><div class="metric-val" id="vsbase-JJ">—</div></div>
+      <div class="metric"><div class="metric-label">담보 평가액</div><div class="metric-val" id="evalamt-JJ">—</div></div>
+      <div class="metric"><div class="metric-label">3개월 저가</div><div class="metric-val" id="low3m-JJ">—</div></div>
+    </div>
+    <div class="progress-section">
+      <div class="progress-header">
+        <span class="progress-label">기준가 대비 여유도</span>
+        <span class="progress-pct" id="prog-pct-JJ">—</span>
+      </div>
+      <div class="progress-track"><div class="progress-fill" id="prog-JJ" style="width:100%;background:var(--safe);"></div></div>
+    </div>
+    <div class="chart-section">
+      <div class="chart-label">3개월 주가 추이</div>
+      <div style="position:relative;height:110px;"><canvas id="chart-JJ"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">
+  데이터: Yahoo Finance · 3개월 저가 기준 · 매 60초 자동 갱신<br>
+  ※ 유지담보비율 140% 미달 시 추가 담보적격주식 또는 예치금 필요
+</div>
+
+<script>
+// ── 담보 설정 ──
+const LOAN_AMOUNT    = 10_000_000_000;  // 대출잔액 100억
+const MAINTAIN_RATIO = 140;             // 유지담보비율 140%
+const OPEN_RATIO     = 200;             // 개시담보비율 200%
+const MAINTAIN_AMT   = LOAN_AMOUNT * MAINTAIN_RATIO / 100; // 140억
+
+// 담보 주식수 (고정)
+const SHARES = { AK: 1_363_194, JJ: 1_410_106 };
+
+const STOCKS = [
+  { id:'AK', name:'애경케미칼', ticker:'161000.KS' },
+  { id:'JJ', name:'제주항공',   ticker:'089590.KS' }
+];
+
+let warnRatio = parseFloat(localStorage.getItem('warn_ratio')) || 160;
+let miniCharts = {};
+
+window.addEventListener('load', () => {
+  document.getElementById('warn-ratio').value = warnRatio;
+  fetchAll();
+  setInterval(fetchAll, 60000);
+});
+
+function fmt(n)    { return Math.round(n).toLocaleString('ko-KR'); }
+function fmtPct(n) { return (n >= 0 ? '+' : '') + n.toFixed(2) + '%'; }
+function fmtAmt(n) {
+  if (n >= 1e12) return (n/1e12).toFixed(1) + '조원';
+  if (n >= 1e8)  return (n/1e8).toFixed(1) + '억원';
+  return fmt(n) + '원';
+}
+
+// 프록시 race
+async function fetchViaProxy(url) {
+  const PROXIES = [
+    u => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
+    u => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
+    u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+  ];
+  return new Promise((resolve, reject) => {
+    let failed = 0;
+    PROXIES.forEach(mp => {
+      fetch(mp(url)).then(async r => {
+        if (!r.ok) throw new Error();
+        const j = await r.json();
+        const raw = j.contents !== undefined ? j.contents : JSON.stringify(j);
+        const p = JSON.parse(raw);
+        if (p?.chart?.result) resolve(p); else throw new Error();
+      }).catch(() => { if (++failed === PROXIES.length) reject(); });
+    });
+  });
+}
+
+async function fetchStock(ticker) {
+  const data = await fetchViaProxy(
+    `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=3mo`
+  );
+  const result  = data.chart.result[0];
+  const meta    = result.meta;
+  const closes  = result.indicators.quote[0].close.filter(Boolean);
+  const current   = meta.regularMarketPrice;
+  const prevClose = meta.chartPreviousClose;
+  const weekAgo   = closes.length >= 6 ? closes[closes.length - 6] : closes[0];
+  const low3m     = closes.length > 0 ? Math.min(...closes) : null;
+  return { current, prevClose, weekAgo, low3m, closes };
+}
+
+function updateCard(id, data) {
+  const current = data.current;
+  const shares  = SHARES[id];
+  const evalAmt = current * shares;
+  const vsBase  = data.low3m ? ((current - data.low3m) / data.low3m) * 100 : 0; // 3개월 저가 대비
+  const weekChg = data.weekAgo ? ((current - data.weekAgo) / data.weekAgo) * 100 : 0;
+
+  // 가격
+  document.getElementById(`price-${id}`).textContent = fmt(current) + '원';
+
+  // 1주일 전 대비
+  const wEl = document.getElementById(`weekchg-${id}`);
+  wEl.textContent = `1주일 전 대비 ${fmtPct(weekChg)} (${weekChg >= 0 ? '+' : ''}${fmt(current - data.weekAgo)}원)`;
+  wEl.className = `week-chg ${weekChg > 0 ? 'up' : weekChg < 0 ? 'down' : 'flat'}`;
+
+  // 메트릭
+  document.getElementById(`baseprice-${id}`).textContent = data.prevClose ? fmt(data.prevClose) + '원' : '—';
+  document.getElementById(`evalamt-${id}`).textContent   = fmtAmt(evalAmt);
+  document.getElementById(`low3m-${id}`).textContent     = data.low3m ? fmt(data.low3m) + '원' : '—';
+
+  const vbEl = document.getElementById(`vsbase-${id}`);
+  vbEl.textContent  = base ? fmtPct(vsBase) : '—';
+  vbEl.className    = `metric-val ${vsBase <= -30 ? 'danger-col' : vsBase <= -15 ? 'warn-col' : 'safe-col'}`;
+
+  // 진행바
+  const pct = base ? Math.max(0, Math.min(100, 100 + vsBase)) : 100;
+  const bar = document.getElementById(`prog-${id}`);
+  bar.style.width    = pct + '%';
+  bar.style.background = vsBase <= -30 ? 'var(--danger)' : vsBase <= -15 ? 'var(--warn)' : 'var(--safe)';
+  document.getElementById(`prog-pct-${id}`).textContent = base ? fmtPct(vsBase) + ' (기준 대비)' : '—';
+
+  // 카드 상태 (담보비율 기준)
+  const card  = document.getElementById(`card-${id}`);
+  const badge = document.getElementById(`badge-${id}`);
+  if (vsBase <= -30) {
+    card.className = 'stock-card danger';
+    badge.textContent = '⚠ 위험'; badge.className = 'status-badge badge-danger';
+  } else if (vsBase <= -15) {
+    card.className = 'stock-card warn';
+    badge.textContent = '주의'; badge.className = 'status-badge badge-warn';
+  } else {
+    card.className = 'stock-card safe';
+    badge.textContent = '✓ 안전'; badge.className = 'status-badge badge-safe';
+  }
+
+  drawChart(id, data.closes);
+  return evalAmt;
+}
+
+function drawChart(id, closes) {
+  if (miniCharts[id]) miniCharts[id].destroy();
+  const isUp = closes[closes.length-1] >= closes[0];
+  const color = isUp ? '#e03131' : '#1971c2';
+  miniCharts[id] = new Chart(document.getElementById(`chart-${id}`), {
+    type: 'line',
+    data: {
+      labels: closes.map((_, i) => {
+        const d = new Date();
+        d.setDate(d.getDate() - (closes.length - 1 - i));
+        return `${d.getMonth()+1}/${d.getDate()}`;
+      }),
+      datasets: [{
+        data: closes, borderColor: color, borderWidth: 1.5,
+        pointRadius: 0, pointHoverRadius: 3, tension: 0.3,
+        fill: { target: 'origin', above: isUp ? 'rgba(224,49,49,0.06)' : 'rgba(25,113,194,0.06)' }
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display:false }, tooltip: { callbacks: { label: ctx => fmt(ctx.raw)+'원' } } },
+      scales: {
+        x: { display:true, ticks:{ color:'#9099aa', font:{size:9}, maxTicksLimit:5, maxRotation:0 }, grid:{display:false}, border:{display:false} },
+        y: { display:true, position:'right', ticks:{ color:'#9099aa', font:{size:9}, maxTicksLimit:4, callback: v => fmt(v) }, grid:{ color:'rgba(0,0,0,0.04)' }, border:{display:false} }
+      }
+    }
+  });
+}
+
+function updateRatioCard(totalEval) {
+  const ratio     = (totalEval / LOAN_AMOUNT) * 100;
+  const margin    = totalEval - MAINTAIN_AMT;
+  const ratioStr  = ratio.toFixed(1) + '%';
+
+  document.getElementById('ratio-num').textContent    = ratioStr;
+  document.getElementById('total-eval').textContent   = fmtAmt(totalEval);
+  document.getElementById('margin-val').textContent   = fmtAmt(Math.abs(margin));
+  document.getElementById('margin-sub').textContent   = margin >= 0 ? '담보 여유금액' : '⚠ 부족금액';
+  document.getElementById('margin-val').style.color   = margin >= 0 ? 'var(--safe)' : 'var(--danger)';
+
+  // 바 (0~300% 범위)
+  const barPct = Math.min(100, (ratio / 300) * 100);
+  const bar    = document.getElementById('ratio-bar');
+  bar.style.width      = barPct + '%';
+  bar.style.background = ratio < MAINTAIN_RATIO ? 'var(--danger)' : ratio < warnRatio ? 'var(--warn)' : 'var(--safe)';
+
+  // 배지
+  const badge = document.getElementById('ratio-badge');
+  if (ratio < MAINTAIN_RATIO) {
+    badge.textContent = '⚠ 담보 부족'; badge.style.background = 'var(--danger-bg)'; badge.style.color = 'var(--danger)';
+  } else if (ratio < warnRatio) {
+    badge.textContent = '주의'; badge.style.background = 'var(--warn-bg)'; badge.style.color = 'var(--warn)';
+  } else {
+    badge.textContent = '✓ 정상'; badge.style.background = 'var(--safe-bg)'; badge.style.color = 'var(--safe)';
+  }
+
+  // 경고 배너
+  const wrap = document.getElementById('alert-wrap');
+  wrap.innerHTML = '';
+  if (ratio < MAINTAIN_RATIO) {
+    const div = document.createElement('div');
+    div.className = 'alert-box danger';
+    div.innerHTML = `🚨 <strong>담보 부족!</strong> 현재 담보비율 ${ratioStr} — 유지비율 140% 미달! 즉시 추가 담보적격주식 또는 예치금이 필요합니다.`;
+    wrap.appendChild(div);
+  } else if (ratio < warnRatio) {
+    const div = document.createElement('div');
+    div.className = 'alert-box warn';
+    div.innerHTML = `⚠️ <strong>주의:</strong> 현재 담보비율 ${ratioStr} — 유지비율(140%)까지 여유가 줄어들고 있습니다.`;
+    wrap.appendChild(div);
+  }
+}
+
+async function fetchAll() {
+  const btn  = document.getElementById('refresh-btn');
+  const spin = document.getElementById('spin-icon');
+  btn.disabled = true; spin.classList.add('active');
+  document.getElementById('error-note').classList.remove('show');
+
+  let totalEval = 0;
+  let anyFail   = false;
+
+  const results = await Promise.allSettled(
+    STOCKS.map(async s => {
+      const data = await fetchStock(s.ticker);
+      return { id: s.id, data };
+    })
+  );
+
+  results.forEach(r => {
+    if (r.status === 'fulfilled') {
+      const evalAmt = updateCard(r.value.id, r.value.data);
+      totalEval += evalAmt;
+    } else {
+      anyFail = true;
+    }
+  });
+
+  if (totalEval > 0) updateRatioCard(totalEval);
+  if (anyFail) document.getElementById('error-note').classList.add('show');
+
+  btn.disabled = false; spin.classList.remove('active');
+  const now = new Date();
+  document.getElementById('last-update').textContent =
+    `${now.toLocaleDateString('ko-KR')} ${now.toLocaleTimeString('ko-KR')} 기준`;
+}
+
+function applyAndFetch() {
+  warnRatio = parseFloat(document.getElementById('warn-ratio').value) || 160;
+  localStorage.setItem('warn_ratio', warnRatio);
+  fetchAll();
+}
+</script>
+</body>
+</html>
